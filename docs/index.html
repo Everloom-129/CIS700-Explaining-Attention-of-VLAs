@@ -1,1 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Explaining Attention in Vision-Language-Action Models</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
+        body {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            line-height: 1.8;
+            color: #2c2416;
+            background: linear-gradient(135deg, #f5e6d3 0%, #d4c4a8 50%, #b8a88a 100%);
+            background-attachment: fixed;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Oil painting texture overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(255,255,255,.03) 2px, rgba(255,255,255,.03) 4px),
+                repeating-linear-gradient(-45deg, transparent, transparent 2px, rgba(0,0,0,.02) 2px, rgba(0,0,0,.02) 4px);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        header {
+            text-align: center;
+            padding: 60px 20px;
+            background: linear-gradient(135deg, rgba(139, 69, 19, 0.15), rgba(160, 82, 45, 0.1));
+            border-radius: 20px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.3);
+            border: 3px solid rgba(139, 69, 19, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            font-size: 3em;
+            color: #5d4e37;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .subtitle {
+            font-size: 1.3em;
+            color: #7d6e57;
+            font-style: italic;
+            margin-bottom: 30px;
+        }
+
+        .meta {
+            font-size: 1.1em;
+            color: #8b7355;
+            margin-top: 20px;
+        }
+
+        .section {
+            background: rgba(255, 248, 240, 0.85);
+            padding: 40px;
+            margin-bottom: 40px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.5);
+            border: 2px solid rgba(139, 69, 19, 0.2);
+            backdrop-filter: blur(5px);
+        }
+
+        h2 {
+            font-size: 2.2em;
+            color: #6b5638;
+            margin-bottom: 25px;
+            border-bottom: 3px solid rgba(139, 69, 19, 0.3);
+            padding-bottom: 15px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.05);
+        }
+
+        h3 {
+            font-size: 1.6em;
+            color: #7d6e57;
+            margin: 30px 0 15px 0;
+            font-weight: bold;
+        }
+
+        p {
+            margin-bottom: 20px;
+            font-size: 1.1em;
+            text-align: justify;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, rgba(218, 165, 32, 0.15), rgba(184, 134, 11, 0.1));
+            border-left: 5px solid #b8860b;
+            padding: 25px;
+            margin: 30px 0;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin: 30px 0;
+        }
+
+        .video-container {
+            background: rgba(255, 255, 255, 0.6);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+            border: 2px solid rgba(139, 69, 19, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .video-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+        }
+
+        .video-container h4 {
+            color: #6b5638;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            text-align: center;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 8px;
+            border: 2px solid rgba(139, 69, 19, 0.3);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin: 30px 0;
+        }
+
+        .image-container {
+            background: rgba(255, 255, 255, 0.6);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+            border: 2px solid rgba(139, 69, 19, 0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .image-container:hover {
+            transform: scale(1.03);
+        }
+
+        .image-container img {
+            width: 100%;
+            border-radius: 8px;
+            border: 2px solid rgba(139, 69, 19, 0.3);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .image-container figcaption {
+            margin-top: 12px;
+            text-align: center;
+            color: #6b5638;
+            font-style: italic;
+            font-size: 0.95em;
+        }
+
+        .metrics-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin: 30px 0;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .metrics-table th {
+            background: linear-gradient(135deg, rgba(139, 69, 19, 0.3), rgba(160, 82, 45, 0.2));
+            color: #5d4e37;
+            padding: 15px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .metrics-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(139, 69, 19, 0.1);
+        }
+
+        .metrics-table tr:hover {
+            background: rgba(218, 165, 32, 0.1);
+        }
+
+        .key-findings {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .finding-card {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(245, 230, 211, 0.8));
+            padding: 25px;
+            border-radius: 12px;
+            border: 2px solid rgba(139, 69, 19, 0.25);
+            box-shadow: 0 5px 18px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .finding-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .finding-card h4 {
+            color: #6b5638;
+            margin-bottom: 12px;
+            font-size: 1.2em;
+            border-bottom: 2px solid rgba(139, 69, 19, 0.2);
+            padding-bottom: 8px;
+        }
+
+        .finding-card p {
+            font-size: 1em;
+            margin-bottom: 0;
+        }
+
+        .architecture-diagram {
+            background: rgba(255, 255, 255, 0.7);
+            padding: 30px;
+            border-radius: 12px;
+            margin: 30px 0;
+            border: 2px solid rgba(139, 69, 19, 0.2);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+        }
+
+        .architecture-diagram pre {
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            line-height: 1.6;
+            color: #5d4e37;
+            overflow-x: auto;
+        }
+
+        code {
+            background: rgba(139, 69, 19, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #7d4e2d;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #8b6914, #b8860b);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 10px 10px 10px 0;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn:hover {
+            background: linear-gradient(135deg, #b8860b, #daa520);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: #7d6e57;
+            font-style: italic;
+            margin-top: 60px;
+            background: rgba(139, 69, 19, 0.1);
+            border-radius: 15px;
+            border: 2px solid rgba(139, 69, 19, 0.2);
+        }
+
+        .layer-comparison {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin: 25px 0;
+            justify-content: center;
+        }
+
+        .layer-badge {
+            background: linear-gradient(135deg, rgba(139, 69, 19, 0.2), rgba(160, 82, 45, 0.15));
+            padding: 10px 20px;
+            border-radius: 25px;
+            border: 2px solid rgba(139, 69, 19, 0.3);
+            font-weight: bold;
+            color: #5d4e37;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2em;
+            }
+            
+            .video-grid, .image-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .section {
+                padding: 25px;
+            }
+        }
+
+        /* Smooth scroll */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        /* Navigation */
+        nav {
+            background: rgba(139, 69, 19, 0.2);
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(139, 69, 19, 0.3);
+        }
+
+        nav a {
+            color: #5d4e37;
+            text-decoration: none;
+            margin: 0 15px;
+            font-weight: bold;
+            font-size: 1.1em;
+            transition: color 0.3s ease;
+        }
+
+        nav a:hover {
+            color: #b8860b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 Explaining Attention in Vision-Language-Action Models</h1>
+            <div class="subtitle">Unveiling the Inner Workings of Pi0.5 PaliGemma VLM</div>
+            <div class="meta">
+                <strong>CIS 700 Final Project</strong><br>
+                University of Pennsylvania | Fall 2024<br>
+                December 2024
+            </div>
+        </header>
+
+        <nav>
+            <a href="#abstract">Abstract</a>
+            <a href="#methodology">Methodology</a>
+            <a href="#results">Results</a>
+            <a href="#visualizations">Visualizations</a>
+            <a href="#findings">Key Findings</a>
+            <a href="#documentation">Documentation</a>
+        </nav>
+
+        <section class="section" id="abstract">
+            <h2>📖 Abstract</h2>
+            <p>
+                This project investigates the attention mechanisms within the Pi0.5 Vision-Language-Action (VLA) model, 
+                specifically focusing on the PaliGemma backbone. We developed a comprehensive data science pipeline to 
+                extract, visualize, and analyze attention patterns across 18 transformer layers during robotic manipulation tasks.
+            </p>
+            <p>
+                Through systematic analysis of attention maps from the DROID dataset, we uncover how the model's visual 
+                attention evolves from low-level feature detection to high-level semantic understanding and action planning. 
+                Our findings reveal distinct functional specialization across layers, with Layer 5 emerging as the primary 
+                "semantic object detector" and deeper layers transitioning focus toward action execution.
+            </p>
+            
+            <div class="highlight-box">
+                <h3>🎯 Research Questions</h3>
+                <ul style="font-size: 1.1em; line-height: 2;">
+                    <li><strong>Spatial Correlation:</strong> Do attention maps focus on task-relevant objects?</li>
+                    <li><strong>Semantic Understanding:</strong> Does text prompt control visual attention?</li>
+                    <li><strong>Temporal Dynamics:</strong> How does attention shift during action execution?</li>
+                    <li><strong>Causal Fidelity:</strong> Are high-attention regions causally important for predictions?</li>
+                    <li><strong>Layer Hierarchy:</strong> What functional specialization exists across layers?</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="section" id="methodology">
+            <h2>🔬 Methodology</h2>
+            
+            <h3>Model Architecture</h3>
+            <div class="architecture-diagram">
+                <pre>
+Input: [Side Camera 224×224] + [Wrist Camera 224×224] + [Text Prompt]
+       ↓
+Tokenization: 256 patches (16×16) per image = 512 image tokens + text tokens
+       ↓
+PaliGemma Backbone: 18 layers, 8 attention heads per layer
+       ↓
+Output: Action predictions (6D pose + gripper)
+                </pre>
+            </div>
+
+            <h3>Data Pipeline</h3>
+            <p>
+                We developed a comprehensive pipeline that processes DROID episodes, extracts attention weights from 
+                each transformer layer, and computes correlation metrics with DINO-X object detection masks. The pipeline 
+                handles keyframe inference (every 8 frames), generates visualizations, and aggregates statistics across 
+                multiple episodes.
+            </p>
+
+            <div class="layer-comparison">
+                <div class="layer-badge">Layer 0-2: Low-level Features</div>
+                <div class="layer-badge">Layer 3-5: Object Recognition</div>
+                <div class="layer-badge">Layer 6: Functional Transition</div>
+                <div class="layer-badge">Layer 7-8: Task Planning</div>
+                <div class="layer-badge">Layer 14-17: Action Execution</div>
+            </div>
+
+            <h3>Core Metrics</h3>
+            <table class="metrics-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Definition</th>
+                        <th>Interpretation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Overlap Ratio</strong></td>
+                        <td>Proportion of attention mass inside object mask</td>
+                        <td>Higher = More focused on object</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Attention Concentration</strong></td>
+                        <td>Ratio of mean attention inside vs outside object</td>
+                        <td>&gt;2.0 indicates strong object focus</td>
+                    </tr>
+                    <tr>
+                        <td><strong>IoU</strong></td>
+                        <td>Spatial overlap between thresholded attention and mask</td>
+                        <td>&gt;0.5 indicates good spatial alignment</td>
+                    </tr>
+                    <tr>
+                        <td><strong>L2 Distance</strong></td>
+                        <td>Euclidean distance between attention maps</td>
+                        <td>Measures attention shift magnitude</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="section" id="results">
+            <h2>📊 Results</h2>
+            
+            <h3>H1.1: Attention-Object Correlation</h3>
+            <p>
+                Our analysis reveals that attention maps strongly correlate with detected objects, with distinct 
+                layer-specific patterns. <strong>Layer 5</strong> shows the highest attention concentration (13.8×), 
+                indicating it serves as the primary semantic object recognition layer.
+            </p>
+
+            <div class="key-findings">
+                <div class="finding-card">
+                    <h4>🎯 Layer 5 Peak</h4>
+                    <p>Highest overlap ratio (0.098) and concentration (13.8×). Pure object recognition without task bias.</p>
+                </div>
+                <div class="finding-card">
+                    <h4>🔄 Layer 6 Transition</h4>
+                    <p>Sharp drop in object attention (overlap: 0.023). Functional transition from "what" to "how".</p>
+                </div>
+                <div class="finding-card">
+                    <h4>🎪 Layer 8 Task Focus</h4>
+                    <p>Second concentration peak (13.4×). Task-oriented attention: "I need to grasp this object".</p>
+                </div>
+                <div class="finding-card">
+                    <h4>🤖 Layer 14-17 Action</h4>
+                    <p>Concentration &lt;1.0. Attention shifts to gripper position, trajectory, and obstacles.</p>
+                </div>
+            </div>
+
+            <h3>Layer Progression Analysis</h3>
+            <div class="highlight-box">
+                <strong>Functional Specialization Across Layers:</strong>
+                <ul style="margin-top: 15px; font-size: 1.05em; line-height: 1.8;">
+                    <li><strong>L0-2:</strong> Low-level features (edges, textures) - Overlap ~0.004-0.016</li>
+                    <li><strong>L3-5:</strong> Object recognition PEAK - Overlap ~0.09-0.10</li>
+                    <li><strong>L6:</strong> Functional transition layer - Overlap drops to 0.023</li>
+                    <li><strong>L7-8:</strong> Task-oriented attention - Overlap ~0.053-0.089</li>
+                    <li><strong>L9+:</strong> Declining object focus, increasing action planning</li>
+                    <li><strong>L14-17:</strong> Action execution - Focus on gripper and trajectory</li>
+                </ul>
+            </div>
+
+            <h3>Critical Insight: Wrist Camera Dominance</h3>
+            <p>
+                A key discovery was that the model primarily relies on <strong>wrist camera attention</strong> 
+                (tokens 256-511) for object manipulation tasks. Initial analysis using exterior camera attention 
+                showed poor correlation, but switching to wrist camera revealed strong spatial alignment with 
+                object masks, confirming the importance of egocentric perspective for manipulation.
+            </p>
+        </section>
+
+        <section class="section" id="visualizations">
+            <h2>🎬 Attention Visualizations</h2>
+            
+            <h3>Temporal Evolution of Attention</h3>
+            <p>
+                The following videos show how attention patterns evolve across different layers during a robotic 
+                manipulation task. Notice how early layers show diffuse attention, middle layers focus sharply on 
+                the target object, and later layers shift toward action-relevant regions.
+            </p>
+
+            <div class="video-grid">
+                <div class="video-container">
+                    <h4>Layer 1: Low-Level Features</h4>
+                    <video controls loop>
+                        <source src="assets/videos/L01_attention.webm" type="video/webm">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p style="margin-top: 15px; font-size: 0.95em; color: #6b5638;">
+                        Diffuse attention across the entire scene, capturing basic visual features.
+                    </p>
+                </div>
+
+                <div class="video-container">
+                    <h4>Layer 5: Semantic Object Recognition</h4>
+                    <video controls loop>
+                        <source src="assets/videos/L05_attention.webm" type="video/webm">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p style="margin-top: 15px; font-size: 0.95em; color: #6b5638;">
+                        <strong>Peak layer:</strong> Sharp focus on task-relevant objects with highest concentration.
+                    </p>
+                </div>
+
+                <div class="video-container">
+                    <h4>Layer 7: Task-Oriented Attention</h4>
+                    <video controls loop>
+                        <source src="assets/videos/L07_attention.webm" type="video/webm">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p style="margin-top: 15px; font-size: 0.95em; color: #6b5638;">
+                        Attention integrates task requirements, focusing on graspable regions.
+                    </p>
+                </div>
+            </div>
+
+            <h3>Object Detection Correlation</h3>
+            <p>
+                These visualizations overlay attention heatmaps with DINO-X object detection masks, demonstrating 
+                the spatial correlation between model attention and detected objects.
+            </p>
+
+            <div class="image-grid">
+                <div class="image-container">
+                    <img src="assets/images/attn_l4_example.jpg" alt="Layer 4 Attention">
+                    <figcaption>Layer 4: Emerging object focus</figcaption>
+                </div>
+                <div class="image-container">
+                    <img src="assets/images/attn_l5_example.jpg" alt="Layer 5 Attention">
+                    <figcaption>Layer 5: Peak semantic attention</figcaption>
+                </div>
+                <div class="image-container">
+                    <img src="assets/images/object_detection_l5.jpg" alt="Object Detection Overlay">
+                    <figcaption>Attention-Object Correlation Analysis</figcaption>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="findings">
+            <h2>💡 Key Findings & Contributions</h2>
+            
+            <div class="highlight-box">
+                <h3>🏆 Major Discoveries</h3>
+                <ol style="font-size: 1.1em; line-height: 2; margin-top: 15px;">
+                    <li><strong>Layer 5 as Semantic Detector:</strong> Identified Layer 5 as the primary semantic 
+                        object recognition layer with 13.8× attention concentration.</li>
+                    <li><strong>Functional Hierarchy:</strong> Discovered clear functional progression: 
+                        Recognition (L3-5) → Transition (L6) → Task Planning (L7-8) → Action Execution (L14+).</li>
+                    <li><strong>Wrist Camera Importance:</strong> Demonstrated that egocentric wrist camera view 
+                        dominates attention for manipulation tasks.</li>
+                    <li><strong>Layer 6 Transition:</strong> Identified Layer 6 as critical transition point where 
+                        attention shifts from "what" (object identity) to "how" (manipulation strategy).</li>
+                    <li><strong>Action-Centric Shift:</strong> Showed that deep layers (14-17) shift focus from 
+                        objects to action-relevant features (gripper, trajectory, obstacles).</li>
+                </ol>
+            </div>
+
+            <h3>Technical Contributions</h3>
+            <div class="key-findings">
+                <div class="finding-card">
+                    <h4>📊 Data Science Pipeline</h4>
+                    <p>Comprehensive pipeline for attention extraction, visualization, and multi-episode aggregation 
+                       (~1,332 lines of code).</p>
+                </div>
+                <div class="finding-card">
+                    <h4>📏 Novel Metrics</h4>
+                    <p>Developed overlap ratio, attention concentration, and IoU metrics for attention-object correlation.</p>
+                </div>
+                <div class="finding-card">
+                    <h4>🎥 Visualization Tools</h4>
+                    <p>Created automated video synthesis and multi-layer comparison tools for temporal analysis.</p>
+                </div>
+                <div class="finding-card">
+                    <h4>📈 Statistical Framework</h4>
+                    <p>Established hypothesis testing framework with success/failure comparison and effect size analysis.</p>
+                </div>
+            </div>
+
+            <h3>Implications for Interpretability</h3>
+            <p>
+                Our findings provide actionable insights for improving VLA model interpretability and performance:
+            </p>
+            <ul style="font-size: 1.05em; line-height: 2; margin-top: 15px;">
+                <li><strong>Debugging:</strong> Layer-specific attention patterns can identify failure modes 
+                    (e.g., poor Layer 5 focus → object recognition failure).</li>
+                <li><strong>Model Pruning:</strong> Understanding layer specialization enables targeted compression 
+                    while preserving critical semantic layers.</li>
+                <li><strong>Attention Guidance:</strong> Attention maps can guide data augmentation and training 
+                    strategies to improve robustness.</li>
+                <li><strong>Failure Prediction:</strong> Attention concentration metrics may serve as real-time 
+                    confidence indicators for deployment.</li>
+            </ul>
+        </section>
+
+        <section class="section" id="documentation">
+            <h2>📚 Documentation & Resources</h2>
+            
+            <h3>Project Documentation</h3>
+            <p>
+                Comprehensive technical documentation covering implementation details, data science methodologies, 
+                and analysis frameworks:
+            </p>
+            
+            <div style="margin: 30px 0;">
+                <a href="../../docs/1223_attn_data_science.md" class="btn">📊 Data Science Methods</a>
+                <a href="../../docs/1220_pi05_attn_visualization.md" class="btn">🔧 Implementation Guide</a>
+                <a href="../../docs/1224_h1_1_object_detection.md" class="btn">🎯 H1.1 Analysis</a>
+            </div>
+
+            <h3>Dataset Statistics</h3>
+            <table class="metrics-table">
+                <thead>
+                    <tr>
+                        <th>Dataset</th>
+                        <th>Size</th>
+                        <th>Episodes</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Input Data</strong></td>
+                        <td>~13 GB</td>
+                        <td>82</td>
+                        <td>DROID format robot manipulation episodes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Attention Maps</strong></td>
+                        <td>~973 MB</td>
+                        <td>32</td>
+                        <td>Static attention visualizations (20,975 images)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Attention Videos</strong></td>
+                        <td>~1.2 GB</td>
+                        <td>48</td>
+                        <td>Temporal evolution videos (1,460 videos)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Code Repository</h3>
+            <div class="highlight-box">
+                <h4>Key Modules:</h4>
+                <ul style="font-size: 1.05em; line-height: 1.8; margin-top: 10px;">
+                    <li><code>viz/attn_map.py</code> - Core attention extraction and visualization</li>
+                    <li><code>viz/object_pipeline.py</code> - Batch processing for H1.1 analysis</li>
+                    <li><code>viz/h1_1_object_detection.py</code> - Object correlation analysis</li>
+                    <li><code>viz/h1_mask_effect.py</code> - Causal fidelity testing</li>
+                    <li><code>viz/combine_video.py</code> - Video synthesis from keyframes</li>
+                </ul>
+            </div>
+
+            <h3>Technologies Used</h3>
+            <div class="layer-comparison">
+                <div class="layer-badge">PyTorch</div>
+                <div class="layer-badge">PaliGemma</div>
+                <div class="layer-badge">DINO-X</div>
+                <div class="layer-badge">OpenCV</div>
+                <div class="layer-badge">NumPy</div>
+                <div class="layer-badge">Matplotlib</div>
+                <div class="layer-badge">H5py</div>
+            </div>
+        </section>
+
+        <footer>
+            <p style="font-size: 1.2em; margin-bottom: 15px;">
+                <strong>Explaining Attention in Vision-Language-Action Models</strong>
+            </p>
+            <p>
+                CIS 700: Advanced Topics in Computer Vision<br>
+                University of Pennsylvania | Fall 2024
+            </p>
+            <p style="margin-top: 20px; font-size: 0.95em;">
+                This project demonstrates the power of attention visualization for understanding and improving 
+                Vision-Language-Action models in robotic manipulation tasks.
+            </p>
+            <p style="margin-top: 20px; color: #8b7355;">
+                🎨 Designed with an oil painting aesthetic to reflect the artistic nature of interpretability research
+            </p>
+        </footer>
+    </div>
+</body>
+</html>
